@@ -35,21 +35,23 @@ async def sendfiles_handler(event):
         await conv.send_message("Fetching files from the database... 📦")
 
         # Fetch all files from MongoDB
-        files = collection.find()
-        if files.count() == 0:
+        file_docs = list(collection.find())
+        if len(file_docs) == 0:
             await conv.send_message("No files found in the database. 🗂️")
             return
 
-        for file_doc in files:
+        for file_doc in file_docs:
             file_id = file_doc.get('file_ref')
             if not file_id:
                 logging.warning("File reference not found in document: %s", file_doc)
                 continue
 
             try:
+                # Download file from Telegram using file_id
                 file = await event.client.download_file(file_id)
                 caption = f"📁 {file_doc.get('file_name')} \n📂 {file_doc.get('caption', '')}"
 
+                # Send the file to the specified channel
                 await event.client.send_file(
                     CHANNEL_ID,
                     file,
