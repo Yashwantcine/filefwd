@@ -1,78 +1,51 @@
 from telethon import TelegramClient, events
-from pymongo import MongoClient
-import logging
-import asyncio
+import pymongo
 
-# MongoDB and Telegram API configuration
-MONGO_URI = "mongodb+srv://akshat:0BrsgNBlLRWGU1yT@cluster0.u0itcyq.mongodb.net/?retryWrites=true&w=majority"
-DATABASE_NAME = "Cluster0"
-COLLECTION_NAME = "Telegram_files"
-API_ID = 14013342
-API_HASH = "c3e1d740fd207c7ae1b373a7546e8a62"
-BOT_TOKEN = "5307169830:AAGQx5NwBq2gTobDh3rE1N6hKmVY1F9NU78"
-CHANNEL_ID = -1002222995427
+# Initialize your MongoDB client
+mongo_client = pymongo.MongoClient("mongodb+srv://akshat:0BrsgNBlLRWGU1yT@cluster0.u0itcyq.mongodb.net/?retryWrites=true&w=majority")
+db = mongo_client['Cluster0']
+collection = db['Telegram_files']
 
-# Set up logging
-logging.basicConfig(level=logging.DEBUG)
+# Initialize your Telegram bot client
+api_id = '14013342'
+api_hash = 'c3e1d740fd207c7ae1b373a7546e8a62'
+bot_token = '5307169830:AAGQx5NwBq2gTobDh3rE1N6hKmVY1F9NU78'
+client = TelegramClient('bot', api_id, api_hash).start(bot_token=bot_token)
 
-# Initialize MongoDB client and database
-mongo_client = MongoClient(MONGO_URI)
-db = mongo_client[DATABASE_NAME]
-collection = db[COLLECTION_NAME]
+async def start_handler(event):
+    await event.respond("Welcome! Use /sendfiles to start sending files.")
 
-# Initialize Telegram client
-client = TelegramClient('bot', API_ID, API_HASH)
+async def sendfiles_handler(event):
+    if event.message.sender_id != (await client.get_me()).id:
+        await event.respond("You are not authorized to use this command.")
+        return
+
+    files = collection.find({})
+    if files.count() == 0:
+        await event.respond("No files found in the database.")
+        return
+
+    for file in files:
+        file_id = file['_id']
+        try:
+            # Fetch file info from Telegram
+            file_info = await client.get_messages(file_id, limit=1)
+            if file_info:
+                file_message = file_info[0]
+                caption = f"📂 File Name: {file['file_name']}\n💾 File Size: {file['file_size']} bytes\n📁 File Type: {file['file_type']}"
+                await client.send_file(event.chat_id, file_message.file.id, caption=caption)
+            else:
+                await event.respond(f"Error retrieving file info for file_id {file_id}")
+        except Exception as e:
+            await event.respond(f"Error processing file_id {file_id}: {str(e)}")
 
 @client.on(events.NewMessage(pattern='/start'))
-async def start_handler(event):
-    await event.respond(
-        "Welcome! Use /sendfiles to start sending files. 📂"
-    )
+async def handler(event):
+    await start_handler(event)
 
 @client.on(events.NewMessage(pattern='/sendfiles'))
-async def sendfiles_handler(event):
-    async with event.client.conversation(event.chat_id) as conv:
-        await conv.send_message("Fetching files from the database... 📦")
+async def handler(event):
+    await sendfiles_handler(event)
 
-        # Fetch all files from MongoDB
-        file_docs = list(collection.find())
-        if len(file_docs) == 0:
-            await conv.send_message("No files found in the database. 🗂️")
-            return
-
-        for file_doc in file_docs:
-            file_id = file_doc.get('file_ref')
-            if not file_id:
-                logging.warning("File reference not found in document: %s", file_doc)
-                continue
-
-            try:
-                # Download file from Telegram using file_id
-                file = await event.client.download_file(file_id)
-                caption = f"📁 {file_doc.get('file_name')} \n📂 {file_doc.get('caption', '')}"
-
-                # Send the file to the specified channel
-                await event.client.send_file(
-                    CHANNEL_ID,
-                    file,
-                    caption=caption
-                )
-                logging.info(f"Sent file {file_id} successfully.")
-            except Exception as e:
-                logging.error(f"Error sending file {file_id}: {e}")
-
-        await conv.send_message("All files have been sent. 🚀")
-
-@client.on(events.NewMessage())
-async def handle_other_messages(event):
-    # Log any other messages for debugging
-    logging.debug(f"Received a message: {event.message.text}")
-
-async def main():
-    # Start the Telegram client
-    await client.start(bot_token=BOT_TOKEN)
-    logging.info("Bot is up and running! 🚀")
-    await client.run_until_disconnected()
-
-if __name__ == '__main__':
-    asyncio.run(main())
+print("Bot is running...")
+client.run_until_disconnected()
